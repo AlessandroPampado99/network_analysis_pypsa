@@ -12,7 +12,7 @@ from configparser import ConfigParser
 class Config():
     def __init__(self):
         self.parser = ConfigParser()
-        self.parser.read("C:\\Users\\aless\\Desktop\\PhD_Pisa\\2025_01_01\\network_analysis\\config\\application.ini")
+        self.parser.read("C:\\Users\\aless\\Desktop\\PhD_Pisa\\2025_01_03\\network_analysis\\config\\application.ini")
         
         self.config = {}  # Dizionario che conterrà la configurazione
         self.init()

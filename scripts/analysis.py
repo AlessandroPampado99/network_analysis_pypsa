@@ -259,7 +259,7 @@ class PyPSANetworkAnalyzer:
         if self.config.get('NETWORK', 'italy_only_analysis'):
             generators = self.network.generators[self.network.generators.index.str.startswith('IT')]
             storage_units = self.network.storage_units[self.network.storage_units.index.str.startswith('IT')]
-            stores = self.network.stores[self.network.stores.index.str.startswith('IT')]
+            stores = self.network.stores[self.network.stores.index.str.startswith('IT')] if not self.network.stores.empty else self.network.stores
             links = self.network.links[self.network.links.index.str.startswith('IT')]
             lines = self.network.lines[self.network.lines.bus0.str.startswith('IT') | self.network.lines.bus1.str.startswith('IT')]
             
@@ -289,8 +289,8 @@ class PyPSANetworkAnalyzer:
             line_statistics = statistics.loc[statistics.index.isin(line_technologies)] /1e3
             statistics = pd.concat([main_statistics, line_statistics])  # Ricombina, con AC/DC alla fine
             
-            optimal_capacity = statistics.optimal_capacity
-            installed_capacity = statistics.installed_capacity
+            optimal_capacity = statistics['Optimal Capacity']
+            installed_capacity = statistics['Installed Capacity']
     
         # Creazione della figura
         technologies = optimal_capacity.index.tolist()
@@ -584,7 +584,7 @@ class PyPSANetworkAnalyzer:
 # Usage example
 if __name__ == "__main__":
     config = Config()
-    network_name = 'base_s_39_elec_lvopt_1h_2013_era.nc'
+    network_name = 'base_s_40_elec_lvopt_1h.nc'
     network_analyzer =  PyPSANetworkAnalyzer(network_name, config)
 
 
