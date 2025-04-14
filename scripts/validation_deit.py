@@ -11,12 +11,13 @@ import numpy as np
 import matplotlib as mpl
 import pandas as pd
 import cartopy.crs as ccrs
+import os
 
 
 
 # Capacità FER installata
-def fer_capacity_installed(n):
-    fer_capacity = pd.DataFrame([121.0, 34.0, 15.1], index=['solar', 'on-wind', 'off-wind'], columns=['DE-IT']) # GW
+def fer_capacity_installed(n, output_folder):
+    fer_capacity = pd.DataFrame([121.0, 34.0, 15.1], index=['solar', 'onwind', 'offwind'], columns=['DE-IT']) # GW
     
     generators = n.generators[n.generators.bus.str.startswith("IT")]
     
@@ -30,7 +31,9 @@ def fer_capacity_installed(n):
     ylabel = 'Capacity [GW]'
     title = 'Comparison of renewable installed capacity in 2040'
     
-    plot_histogram(fer_capacity, n, xlabel, ylabel, title)
+    output_folder = f"{output_folder}/total_capacity"
+    
+    plot_histogram(fer_capacity, n, xlabel, ylabel, title, output_folder)
     
     return fer_capacity
 
@@ -74,7 +77,7 @@ def fer_percentage(n, fer_capacity):
 
 # Produzione
 
-def production(n):    
+def production(n, output_folder):    
     prod = pd.DataFrame([46,168,121,17,59,6], index=['hydro', 'solar', 'wind', 'FER other', 'natural gas', 'non-FER other'], columns=['DE-IT']) # TWh
 
     generators_t = n.generators_t.p.loc[:, n.generators_t.p.columns.str.startswith('IT')]
@@ -93,14 +96,16 @@ def production(n):
     ylabel = 'Total generation [TWh]'
     title = 'Comparison of total generation per carrier in 2040'
     
-    plot_histogram(prod, n, xlabel, ylabel, title)
+    output_folder = f"{output_folder}/total_generation"
+    
+    plot_histogram(prod, n, xlabel, ylabel, title, output_folder)
     
     return prod
 
 
 # Import export
 
-def import_nations(n):
+def import_nations(n, output_folder):
     import_export = pd.DataFrame([6,27,31,-3,-3,-3], index=['AT', 'CH', 'FR', 'GR', 'ME', 'SI'], columns=['DE-IT'])
     
     import_lines = dict()
@@ -129,12 +134,53 @@ def import_nations(n):
     ylabel = 'Imported energy [TWh]'
     title = 'Comparison of import/export flows in 2040'
     
-    plot_histogram(import_export, n, xlabel, ylabel, title)
+    output_folder = f"{output_folder}/import_export"
+    plot_histogram(import_export, n, xlabel, ylabel, title, output_folder)
     
     return import_export
 
+# Total production other countries
+def foreign_production(n, nation, output_folder):
+    
+    generators_t = n.generators_t.p.loc[:, n.generators_t.p.columns.str.startswith(nation)]
+    storage_units_t = n.storage_units_t.p_dispatch.loc[:, n.storage_units_t.p_dispatch.columns.str.startswith(nation)]    
+    
+    
+    oil = generators_t.filter(like = "oil").sum().sum() / 1e6
+    natural_gas = generators_t.filter(like = "CCGT").sum().sum() / 1e6
+    nuclear = generators_t.filter(like = "nuclear").sum().sum() / 1e6
+    hydro = storage_units_t.sum().sum() / 1e6 + generators_t.filter(like = "ror").sum().sum() / 1e6
+    biomass = generators_t.filter(like = "biomass").sum().sum() / 1e6
+    wind = generators_t.filter(like=None, regex='wind').sum().sum()/1e6
+    solar = generators_t.filter(like = "solar").sum().sum() / 1e6
+    geothermal = generators_t.filter(like = "geothermal").sum().sum() / 1e6
+    
+    pypsa_prod = {
+        'Oil': oil,
+        'Natural gas': natural_gas,
+        'Nuclear': nuclear,
+        'Hydro': hydro,
+        'Biofuels': biomass,
+        'Wind': wind,
+        'Solar PV': solar,
+        'Geothermal': geothermal
+    }
+    
+    prod = pd.DataFrame.from_dict(pypsa_prod, orient='index', columns=['Production'])
+    
+    
+    xlabel = prod.index
+    ylabel = 'Total generation [TWh]'
+    title = 'Comparison of total generation per carrier in 2019'
+    output_folder = f"{output_folder}/{nation}_production"
+    
+    plot_histogram(prod, n, xlabel, ylabel, title, output_folder)
+    
+    return prod
 
-def plot_histogram(df, n, xlabel, ylabel, title):
+
+
+def plot_histogram(df, n, xlabel, ylabel, title, output_folder):
     #grafico confronto capacità
     x_axis = df.index
 
@@ -149,7 +195,9 @@ def plot_histogram(df, n, xlabel, ylabel, title):
 
     # Barre
     bars1 = ax.bar(x - bar_width / 2, df[df.columns[0]].values.flatten(), width=bar_width, label=df.columns[0], color='#1f77b4', edgecolor='black', linewidth=1)
-    bars2 = ax.bar(x + bar_width / 2, df[df.columns[1]].values.flatten(), width=bar_width, label=df.columns[1], color='#ff7f0e', edgecolor='black', linewidth=1)
+    
+    if len(df.columns) > 1:
+        bars2 = ax.bar(x + bar_width / 2, df[df.columns[1]].values.flatten(), width=bar_width, label=df.columns[1], color='#ff7f0e', edgecolor='black', linewidth=1)
 
     # Etichette e titolo
 
@@ -168,10 +216,11 @@ def plot_histogram(df, n, xlabel, ylabel, title):
     for bar in bars1:
         yval = bar.get_height()
         ax.text(bar.get_x() + bar.get_width() / 2, yval + 2.5, round(yval, 2), ha='center', va='bottom', fontsize=10, color='black')
-
-    for bar in bars2:
-        yval = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width() / 2, yval + 2.5, round(yval, 2), ha='center', va='bottom', fontsize=10, color='black')
+    
+    if len(df.columns) > 1:
+        for bar in bars2:
+            yval = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width() / 2, yval + 2.5, round(yval, 2), ha='center', va='bottom', fontsize=10, color='black')
 
     # Legenda
     ax.legend(fontsize=10, frameon=True, framealpha=0.7, facecolor='white', edgecolor='black')
@@ -180,15 +229,29 @@ def plot_histogram(df, n, xlabel, ylabel, title):
     plt.tight_layout(pad=3.0)
 
     # Mostra il grafico
+    plt.savefig(f"{output_folder}.png", format='png', dpi=300, bbox_inches='tight')
     plt.show()
 
 
 # Main
 if __name__ == "__main__":
-    n = pypsa.Network("../networks/2040_DEIT.nc")
-    fer_capacity = fer_capacity_installed(n)
+    name = "2040_DEIT"
+    n = pypsa.Network(f"../networks/{name}.nc")
+    
+    output_folder = f"../results/{name}"
+
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    
+    fer_capacity = fer_capacity_installed(n, output_folder)
     error_storage = total_storage(n)
     error_fer = fer_percentage(n, fer_capacity)
-    prod = production(n)
-    import_export = import_nations(n)
+    prod = production(n, output_folder)
+    import_export = import_nations(n, output_folder)
+    
+    production_foreign_countries = dict()
+    for nation in ['FR', 'CH', 'AT', 'GR', 'SI', 'ME']:
+        production_foreign_countries[nation] = foreign_production(n, nation, output_folder)
+    
+
 

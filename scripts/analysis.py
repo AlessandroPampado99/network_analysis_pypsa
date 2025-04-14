@@ -137,8 +137,9 @@ class PyPSANetworkAnalyzer:
         if self.config.get('SYSTEM_COST', 'plot'):
             self.system_cost()
         
-        if self.config.get('NETWORK', 'italy_only_analysis'):
-            self.results['total_load'] = self.network.loads_t.p.loc[:, self.network.loads_t.p.columns.str.startswith('IT')].sum() /1e3
+        if self.config.get('NETWORK', 'nation_only_analysis'):
+            nation = self.config.get('NETWORK', 'nation')
+            self.results['total_load'] = self.network.loads_t.p.loc[:, self.network.loads_t.p.columns.str.startswith(nation)].sum() /1e3
         else:
             self.results['total_load'] = self.network.loads_t.p.sum() /1e3
         
@@ -148,9 +149,10 @@ class PyPSANetworkAnalyzer:
         generators = self.network.generators
         generators_t = self.network.generators_t.p
         
-        if self.config.get('NETWORK', 'italy_only_analysis'):
-            generators = generators[generators.index.str.startswith('IT')]
-            generators_t = generators_t.loc[:, generators_t.columns.str.startswith('IT')]
+        if self.config.get('NETWORK', 'nation_only_analysis'):
+            nation = self.config.get('NETWORK', 'nation')
+            generators = generators[generators.index.str.startswith(nation)]
+            generators_t = generators_t.loc[:, generators_t.columns.str.startswith(nation)]
         
         generators_grouped = generators.groupby('carrier').sum()
         # In kW
@@ -175,16 +177,22 @@ class PyPSANetworkAnalyzer:
         
     def analyze_lines(self):
        lines = self.network.lines
-       if self.config.get('NETWORK', 'italy_only_analysis'):
-            lines = lines[lines.index.str.startswith('IT')]
-       self.results['line_loading'] = self.network.lines_t.p0.abs().max(axis=0) / self.network.lines.s_nom_opt
+       if self.config.get('NETWORK', 'nation_only_analysis'):
+           nation = self.config.get('NETWORK', 'nation')
+           lines = lines[lines.index.str.startswith(nation)]
+       self.results['line_loading_max'] = self.network.lines_t.p0.abs().max(axis=0) / self.network.lines.s_nom_opt
+       self.results['line_loading_mean'] = self.network.lines_t.p0.abs().mean(axis=0) / self.network.lines.s_nom_opt
        self.results['line_expansion'] = pd.DataFrame((lines['s_nom_opt'] - lines['s_nom']), columns=['line_expansion_absolute'])
        self.results['line_expansion']['line_expansion_relative'] = (lines['s_nom_opt'] - lines['s_nom']) / lines['s_nom']
         
     
     def plot_generators_increase(self, p_nom_opt):
         """Plot increase in size of generators as a bar chart with log scale."""
+        
+        p_nom_opt = p_nom_opt.drop(['geothermal', 'ror', 'solar-hsat'], errors='ignore')
+        
         colors = [self.colors.get(carrier, '#333333') for carrier in p_nom_opt.index]
+        
         # Creazione del grafico
         fig, ax = plt.subplots(figsize=(10, 6))
         bars = p_nom_opt.plot.bar(ax=ax, color=colors)
@@ -214,7 +222,8 @@ class PyPSANetworkAnalyzer:
         
     def plot_dispatchbycarrier_histogram(self, generators_t):
         """Plot histogram of dispatch of carriers."""
-        if self.config.get('NETWORK', 'italy_only_analysis'):
+        
+        if self.config.get('NETWORK', 'nation_only_analysis'):
             carrier = [self.network.carriers.loc[name.split(" ")[-1]].name for name in generators_t.columns]
             carrier = [self.network.carriers.loc[c, 'nice_name'] for c in carrier]
             dispatch = generators_t.T.groupby(by=carrier).sum().sum(axis=1)
@@ -235,7 +244,7 @@ class PyPSANetworkAnalyzer:
                     bar.get_x() + bar.get_width() / 2,  # Posizione orizzontale
                     bar.get_height(),  # Altezza della barra
                     f"{value:.2e}",  # Formattazione del valore
-                    ha='center', va='bottom', fontsize=9, color='black'  # Allineamento e stile
+                    ha='center', va='bottom', fontsize=7, color='black'  # Allineamento e stile
                 )
         
         # Personalizzazione del grafico
@@ -256,12 +265,13 @@ class PyPSANetworkAnalyzer:
         
         line_technologies = ['AC', 'DC']
         
-        if self.config.get('NETWORK', 'italy_only_analysis'):
-            generators = self.network.generators[self.network.generators.index.str.startswith('IT')]
-            storage_units = self.network.storage_units[self.network.storage_units.index.str.startswith('IT')]
-            stores = self.network.stores[self.network.stores.index.str.startswith('IT')] if not self.network.stores.empty else self.network.stores
-            links = self.network.links[self.network.links.index.str.startswith('IT')]
-            lines = self.network.lines[self.network.lines.bus0.str.startswith('IT') | self.network.lines.bus1.str.startswith('IT')]
+        if self.config.get('NETWORK', 'nation_only_analysis'):
+            nation = self.config.get('NETWORK', 'nation')
+            generators = self.network.generators[self.network.generators.index.str.startswith(nation)]
+            storage_units = self.network.storage_units[self.network.storage_units.index.str.startswith(nation)]
+            stores = self.network.stores[self.network.stores.index.str.startswith(nation)] if not self.network.stores.empty else self.network.stores
+            links = self.network.links[self.network.links.index.str.startswith(nation)]
+            lines = self.network.lines[self.network.lines.bus0.str.startswith(nation) | self.network.lines.bus1.str.startswith('IT')]
             
             optimal_capacity = pd.concat([
                 generators.groupby('carrier').sum().p_nom_opt,
@@ -584,7 +594,7 @@ class PyPSANetworkAnalyzer:
 # Usage example
 if __name__ == "__main__":
     config = Config()
-    network_name = 'base_s_40_elec_lvopt_1h.nc'
+    network_name = '2040_deit.nc'
     network_analyzer =  PyPSANetworkAnalyzer(network_name, config)
 
 
