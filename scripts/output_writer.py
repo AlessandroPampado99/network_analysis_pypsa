@@ -90,13 +90,14 @@ class OutputWriter():
         
     
     def export_line_loading(self):
-        line_loading = self.network_analyzer.results['line_loading']
-        line_loading.index = line_loading.index.astype(int)
-        line_loading = line_loading.sort_index()
-        line_loading.name = self.network_name
-        line_loading = pd.DataFrame(line_loading).T
-        
-        self.export_objective(line_loading, 'line_loading')
+        for attr in ['max', 'mean']:
+            line_loading = self.network_analyzer.results[f"line_loading_{attr}"]
+            line_loading.index = line_loading.index.astype(int)
+            line_loading = line_loading.sort_index()
+            line_loading.name = self.network_name
+            line_loading = pd.DataFrame(line_loading).T
+            
+            self.export_objective(line_loading, f"line_loading_{attr}")
         
     def export_line_expansion(self):
         line_expansion = self.network_analyzer.results['line_expansion']['line_expansion_relative']

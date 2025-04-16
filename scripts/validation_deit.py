@@ -215,12 +215,12 @@ def plot_histogram(df, n, xlabel, ylabel, title, output_folder):
     # Aggiungere i valori sopra le barre
     for bar in bars1:
         yval = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width() / 2, yval + 2.5, round(yval, 2), ha='center', va='bottom', fontsize=10, color='black')
+        ax.text(bar.get_x() + bar.get_width() / 2, yval + 0.5, round(yval, 2), ha='center', va='bottom', fontsize=10, color='black')
     
     if len(df.columns) > 1:
         for bar in bars2:
             yval = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width() / 2, yval + 2.5, round(yval, 2), ha='center', va='bottom', fontsize=10, color='black')
+            ax.text(bar.get_x() + bar.get_width() / 2, yval + 0.5, round(yval, 2), ha='center', va='bottom', fontsize=10, color='black')
 
     # Legenda
     ax.legend(fontsize=10, frameon=True, framealpha=0.7, facecolor='white', edgecolor='black')

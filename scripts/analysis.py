@@ -1,6 +1,7 @@
 import pypsa
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 from pypsa.plot import add_legend_patches
 import cartopy.crs as ccrs
 import cartopy
@@ -120,7 +121,8 @@ class PyPSANetworkAnalyzer:
             self.plot_dispatch()
         
         if self.config.get('NETWORK_PLOT', 'plot_network_pnomopt'):
-            self.plot_network_p_nom_opt()
+            self.plot_network_p_nom_opt_gen()
+            self.plot_network_p_nom_opt_stor()
         if self.config.get('NETWORK_PLOT', 'plot_network_marginalcost'):
             self.plot_network_marginal_cost()
         if self.config.get('NETWORK_PLOT', 'plot_network_totalload'):
@@ -177,11 +179,13 @@ class PyPSANetworkAnalyzer:
         
     def analyze_lines(self):
        lines = self.network.lines
-       if self.config.get('NETWORK', 'nation_only_analysis'):
-           nation = self.config.get('NETWORK', 'nation')
-           lines = lines[lines.index.str.startswith(nation)]
        self.results['line_loading_max'] = self.network.lines_t.p0.abs().max(axis=0) / self.network.lines.s_nom_opt
        self.results['line_loading_mean'] = self.network.lines_t.p0.abs().mean(axis=0) / self.network.lines.s_nom_opt
+       
+       self.results['link_loading_max'] = self.network.links_t.p0.abs().max(axis=0) / self.network.links.p_nom_opt
+       self.results['link_loading_mean'] = self.network.links_t.p0.abs().mean(axis=0) / self.network.links.p_nom_opt
+       
+       
        self.results['line_expansion'] = pd.DataFrame((lines['s_nom_opt'] - lines['s_nom']), columns=['line_expansion_absolute'])
        self.results['line_expansion']['line_expansion_relative'] = (lines['s_nom_opt'] - lines['s_nom']) / lines['s_nom']
         
@@ -189,9 +193,14 @@ class PyPSANetworkAnalyzer:
     def plot_generators_increase(self, p_nom_opt):
         """Plot increase in size of generators as a bar chart with log scale."""
         
-        p_nom_opt = p_nom_opt.drop(['geothermal', 'ror', 'solar-hsat'], errors='ignore')
+        offwind_sum = p_nom_opt.loc[["offwind-ac", "offwind-dc", "offwind-float"]].sum()
+        p_nom_opt = p_nom_opt.drop(["offwind-ac", "offwind-dc", "offwind-float", 'geothermal', 'ror', 'solar-hsat'], errors='ignore')
+        p_nom_opt.loc["offwind"] = offwind_sum
         
-        colors = [self.colors.get(carrier, '#333333') for carrier in p_nom_opt.index]
+        colors = self.colors.copy()
+        colors.loc['offwind'] = colors.loc['offwind-ac']
+        
+        colors = [colors.get(carrier, '#333333') for carrier in p_nom_opt.index]
         
         # Creazione del grafico
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -224,14 +233,39 @@ class PyPSANetworkAnalyzer:
         """Plot histogram of dispatch of carriers."""
         
         if self.config.get('NETWORK', 'nation_only_analysis'):
-            carrier = [self.network.carriers.loc[name.split(" ")[-1]].name for name in generators_t.columns]
-            carrier = [self.network.carriers.loc[c, 'nice_name'] for c in carrier]
-            dispatch = generators_t.T.groupby(by=carrier).sum().sum(axis=1)
+            
+            italian_cols = generators_t.columns[generators_t.columns.str.startswith('IT')]
+        
+            carriers = self.network.generators.loc[italian_cols, 'carrier']
+            nice_names = self.network.carriers.loc[carriers.values, 'nice_name'].values
+        
+            dispatch = (
+                generators_t[italian_cols]
+                .T.set_axis(nice_names)  # Imposta i carrier come index per il groupby
+                .groupby(level=0)
+                .sum()
+                .sum(axis=1)
+            )
         else:
             statistics = self.statistics.loc[~self.statistics.index.isin([('Load', '-'), ('Line', 'AC'), ('Link', 'DC')])].droplevel(0)
             dispatch = statistics['Supply'].T
+            
+        offwind_sum = dispatch.loc[["Offshore Wind (AC)", "Offshore Wind (DC)", "Offshore Wind (Floating)"]].sum()
+        dispatch = dispatch.drop(["Offshore Wind (AC)", "Offshore Wind (DC)", "Offshore Wind (Floating)", 'geothermal', 'ror', 'solar-hsat'], errors='ignore')
+        dispatch.loc["Offwind"] = offwind_sum
         
-        colors = dispatch.index.map(self.network.carriers.set_index('nice_name').color)
+        # colors = [colors.get(carrier, '#333333') for carrier in dispatch.index]
+        
+        # Extract the color for each carrier from the network.carriers dataframe
+        carrier_colors = self.network.carriers.set_index('nice_name')['color']
+        
+        # Map the dispatch index (which are nice names) to their corresponding color
+        colors = dispatch.index.to_series().map(carrier_colors).fillna('#333333')
+        
+        # Optionally overwrite specific colors (e.g., custom color for Offwind)
+        colors.loc["Offwind"] = "#6895dd"
+
+        
         # Creazione del grafico
         fig, ax = plt.subplots(figsize=(10, 6))
         bars = dispatch.plot.bar(ax=ax, color=colors)
@@ -500,36 +534,103 @@ class PyPSANetworkAnalyzer:
 
 
         
-    def plot_network_p_nom_opt(self):
+    def plot_network_p_nom_opt_gen(self):
         """Plot the network layout, based on the optimal size of the generators (s)"""
         
         # Calculate the size of the buses based on the optimal size of the generators
         s = self.network.generators.p_nom_opt.groupby([self.network.generators.bus, self.network.generators.carrier]).sum()
+        p_nom_opt = self.network.generators.p_nom_opt.groupby(self.network.generators.carrier).sum()
+        colors = [self.colors.get(carrier, '#333333') for carrier in p_nom_opt.index]
+        
+        title = "Network Layout per generators optimal capacity"
+        output = 'generators'
+        
+        self.plot_nom_opt(s, p_nom_opt, colors, title, output)
+        
+    def plot_network_p_nom_opt_stor(self):
+        """Plot the network layout, based on the optimal size of the generators (s)"""
+        
+        # 1. Concatenare p_nom_opt da generators, storage_units e stores
+        all_pnoms = pd.concat([
+            self.network.storage_units.assign(component='storage_unit')[['bus', 'carrier', 'p_nom_opt']],
+            self.network.stores.assign(component='store')[['bus', 'carrier', 'e_nom_opt']].rename(columns={'e_nom_opt': 'p_nom_opt'})
+        ])
+        
+        # 2. Calcolare le dimensioni dei bus (gruppati per bus e carrier)
+        s = all_pnoms.groupby(['bus', 'carrier'])['p_nom_opt'].sum()
+        
+        # 3. Somma totale per ogni carrier (per la legenda)
+        p_nom_opt = all_pnoms.groupby('carrier')['p_nom_opt'].sum()
+        
+        # 4. Colori da dizionario self.colors
+        colors = [self.colors.get(carrier, '#333333') for carrier in p_nom_opt.index]
+        
+        title = "Network Layout per storages optimal capacity"
+        output = 'stores'
+
+        
+        self.plot_nom_opt(s, p_nom_opt, colors, title, output)
+        
+        
+    def plot_nom_opt(self, s, p_nom_opt, colors, title, output):
+        
         fig = plt.figure()
         ax = plt.axes(projection=ccrs.PlateCarree())
         ax.add_feature(cartopy.feature.OCEAN, color="azure")
         ax.add_feature(cartopy.feature.LAND, color="cornsilk")
         
-        self.network.plot(ax=ax, margin=0.1, bus_sizes=s / self.config.get('NETWORK_PLOT', 'bus_scaling_factor'),
-                          line_widths=self.results['line_loading']*self.config.get('NETWORK_PLOT', 'line_scaling_factor'),
+        self.network.plot(ax=ax,
+                          margin=0.1,
+                          bus_sizes=s / self.config.get('NETWORK_PLOT', 'bus_scaling_factor'),
+                          branch_components = ["Line", "Link"],
+                          line_widths=self.network.lines.s_nom_opt/4e3,
+                          link_widths=self.network.links.p_nom_opt/4e3,
+                          line_colors = self.results['line_loading_mean'],
+                          link_colors = self.results['link_loading_mean'],
+                          line_cmap = plt.cm.viridis, 
                           )
         
-  
+
         
         # Add legend based on carriers
         add_legend_patches(
             ax=ax,
-            colors=self.colors,
-            labels=self.network.carriers.index,
-            legend_kw=dict(frameon=True, bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=6)
+            colors=colors,
+            labels=p_nom_opt.index,
+            legend_kw=dict(frameon=True,
+                           loc='upper right', fontsize=6,
+                           title='Carriers', title_fontsize=6)
         )
         
+        # Parametri per la legenda delle linee
+        cmap = plt.cm.viridis
+        norm = plt.Normalize(
+            vmin=self.results['line_loading_mean'].min(),
+            vmax=self.results['line_loading_mean'].max()
+        )
+        
+        # Numero di etichette nella legenda
+        n_labels = 6
+        values = [norm.vmin + i * (norm.vmax - norm.vmin) / (n_labels - 1) for i in range(n_labels)]
+        labels = [f"{v:.2f}" for v in values]
+        handles = [mpl.patches.Patch(color=cmap(norm(v))) for v in values]
+        
+        # Crea la seconda legenda
+        line_legend = ax.legend(
+            handles, labels, title="Line loading",
+            loc="lower left", frameon=True, fontsize=6,
+            title_fontsize=6
+        )
+        
+        # Aggiungi la seconda legenda al grafico
+        ax.add_artist(line_legend)
+        
         # Add title
-        plt.title("Network Layout per generators optimal capacity")
+        plt.title(title, fontweight='bold')
         plt.tight_layout()
         
         if self.config.get('NETWORK_PLOT', 'save_network_pnomopt'):
-            plt.savefig(f"{self.output_folder}/network_pnomopt.png", dpi=300, bbox_inches='tight')
+            plt.savefig(f"{self.output_folder}/network_pnomopt_{output}.png", dpi=300, bbox_inches='tight')
     
     
     def plot_network_total_load(self):
@@ -544,11 +645,11 @@ class PyPSANetworkAnalyzer:
         
         if self.config.get('NETWORK', 'sector_coupled'):
             self.network.plot(ax=ax, margin=0.1,
-                              line_widths=self.results['line_loading']*self.config.get('NETWORK_PLOT', 'line_scaling_factor'),
+                              line_widths=self.results['line_loading_mean']*self.config.get('NETWORK_PLOT', 'line_scaling_factor'),
                               )
         else:
             self.network.plot(ax=ax, margin=0.1, bus_sizes=s / self.config.get('NETWORK_PLOT', 'bus_scaling_factor'),
-                              line_widths=self.results['line_loading']*self.config.get('NETWORK_PLOT', 'line_scaling_factor'),
+                              line_widths=self.results['line_loading_mean']*self.config.get('NETWORK_PLOT', 'line_scaling_factor'),
                               )
         
         # Add title
@@ -563,6 +664,12 @@ class PyPSANetworkAnalyzer:
     def plot_network_marginal_cost(self):
         """Plot the network layout, based on the marginal cost per buses"""
         
+        cols = self.network.buses_t.marginal_price.columns
+        filtered_cols = cols[
+            cols.str.match(r'^.*\d+$') & ~cols.str.contains("battery|H2", case=False)
+        ]
+        filtered = self.network.buses_t.marginal_price[filtered_cols]
+        
         fig = plt.figure(figsize=(7, 7))
         ax = plt.axes(projection=ccrs.PlateCarree())
         ax.add_feature(cartopy.feature.OCEAN, color="azure")
@@ -573,10 +680,11 @@ class PyPSANetworkAnalyzer:
         
         self.network.plot(
             ax=ax,
-            bus_colors=self.network.buses_t.marginal_price.mean(),
+            bus_colors=filtered.mean(),
             bus_cmap="plasma",
             bus_norm=norm,
-            bus_alpha=0.7,
+            bus_alpha=1,
+            bus_sizes=0.1
         )
         
         plt.colorbar(
