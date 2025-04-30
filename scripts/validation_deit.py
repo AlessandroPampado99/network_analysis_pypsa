@@ -178,6 +178,47 @@ def foreign_production(n, nation, output_folder):
     
     return prod
 
+def emissions_italy(n):
+    generators = n.generators[n.generators.bus.str.startswith("IT")]
+    generators_t = n.generators_t.p.loc[:, n.generators_t.p.columns.str.startswith('IT')]
+    
+    emissions = (
+        generators_t.div(generators.efficiency, axis=1)
+        .mul(generators.carrier.map(n.carriers.co2_emissions), axis=1)
+        .sum().sum()
+    ) / 1e6
+    
+    return emissions
+
+def france_pmaxpu_wind(n):
+    # Filter generator names for wind and solar in France
+    wind_generators = n.generators.loc[
+        n.generators.bus.str.startswith("FR") &
+        n.generators.carrier.str.contains("wind", case=False)
+    ].copy()
+    
+    solar_generators = n.generators.loc[
+        n.generators.bus.str.startswith("FR") &
+        n.generators.carrier.str.contains("solar", case=False)
+    ].copy()
+    
+    # Compute mean p_max_pu for wind and solar
+    mean_pu_wind = n.generators_t.p_max_pu[wind_generators.index].mean().groupby(wind_generators.bus).mean()
+    mean_pu_solar = n.generators_t.p_max_pu[solar_generators.index].mean().groupby(solar_generators.bus).mean()
+    
+    # Rename for clarity
+    mean_pu_wind.name = "mean_p_max_pu_wind"
+    mean_pu_solar.name = "mean_p_max_pu_solar"
+    
+    # Merge with bus coordinates
+    bus_coords = n.buses[['x', 'y']]
+    result = bus_coords.join(mean_pu_wind).join(mean_pu_solar)
+    
+    # Drop rows without any generation (optional)
+    result = result.dropna(subset=["mean_p_max_pu_wind", "mean_p_max_pu_solar"], how='all')
+    
+    return result
+
 
 
 def plot_histogram(df, n, xlabel, ylabel, title, output_folder):
@@ -235,7 +276,7 @@ def plot_histogram(df, n, xlabel, ylabel, title, output_folder):
 
 # Main
 if __name__ == "__main__":
-    name = "2040_DEIT"
+    name = "2040_deit_geothermal"
     n = pypsa.Network(f"../networks/{name}.nc")
     
     output_folder = f"../results/{name}"
@@ -253,5 +294,7 @@ if __name__ == "__main__":
     for nation in ['FR', 'CH', 'AT', 'GR', 'SI', 'ME']:
         production_foreign_countries[nation] = foreign_production(n, nation, output_folder)
     
-
+    emissions = emissions_italy(n)
+    
+    france_wind = france_pmaxpu_wind(n)
 

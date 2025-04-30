@@ -50,7 +50,7 @@ def production(n, nation, prod):
     natural_gas = generators_t.filter(like = "CCGT").sum().sum() / 1e6
     nuclear = generators_t.filter(like = "nuclear").sum().sum() / 1e6
     hydro = storage_units_t.sum().sum() / 1e6 + generators_t.filter(like = "ror").sum().sum() / 1e6
-    biomass = generators_t.filter(like = "biomass").sum().sum() / 1e6
+    biomass = generators_t.filter(like = None, regex="biomass|waste").sum().sum() / 1e6
     wind = generators_t.filter(like=None, regex='wind').sum().sum()/1e6
     solar = generators_t.filter(like = "solar").sum().sum() / 1e6
     geothermal = generators_t.filter(like = "geothermal").sum().sum() / 1e6
@@ -119,11 +119,73 @@ def prod_italy(n):
     generators_t = n.generators_t.p.loc[:, n.generators_t.p.columns.str.startswith('IT')]
     storage_units_t = n.storage_units_t.p_dispatch.loc[:, n.storage_units_t.p_dispatch.columns.str.startswith('IT')]
     
+    prod_italy_df = pd.read_excel("C:\\Users\\aless\\Desktop\\PhD_Pisa\\2025_01_04\\validation_europe\\italy.xlsx", sheet_name='prod', index_col=0)
+    prod_italy_df = prod_italy_df.loc[prod_italy_df.Year == 2019, ['Value']] / 1e3
+    
     it = generators_t.sum().sum() / 1e6 + storage_units_t.sum().sum() / 1e6
     
-    return it
+    prod_italy_df = prod_italy_df.rename(columns={'Value': 'Terna'})  # rinomina la colonna
+    prod_italy_df = prod_italy_df.drop(['Other sources', 'Tide'], errors='ignore')
+    
+    prod_italy_df = production(n, 'IT', prod_italy_df)
+    
+    prod_italy_df = italy_2019_postprocessing(prod_italy_df)
+    
+    xlabel = prod_italy_df.index
+    ylabel = 'Total generation [TWh]'
+    title = 'Comparison of total generation per carrier in 2019'
+    nation = 'IT'
+    
+    plot_histogram(prod_italy_df, n, xlabel, ylabel, title, nation)
+    
+    
+    return it, prod_italy_df
+
+
+def capacity_installed_italy(n):
+    capacity = pd.read_excel("C:\\Users\\aless\\Desktop\\PhD_Pisa\\2025_01_04\\validation_europe\\italy.xlsx", sheet_name='capacity', index_col=0)
+    
+    generators = n.generators[n.generators.index.str.startswith('IT')]
+    storage_units = n.storage_units[n.storage_units.index.str.startswith('IT')]
+    
+    
+    photovoltaic = generators[generators.carrier == 'solar'].p_nom_opt.sum() / 1e3
+    wind = generators[generators.carrier.isin(['onwind', 'offwind-ac', 'offwind-dc', 'offwind-float'])].p_nom_opt.sum() / 1e3
+    hydro = generators[generators.carrier == 'ror'].p_nom_opt.sum() / 1e3 + storage_units.p_nom_opt.sum() / 1e3
+    other_res = generators[generators.carrier.isin(['geothermal', 'biomass'])].p_nom_opt.sum() / 1e3
+    thermoelectric = generators[generators.carrier.isin(['coal', 'oil', 'CCGT'])].p_nom_opt.sum() /1e3
+    
+    capacity['PyPSA'] = [photovoltaic, wind, hydro, other_res, thermoelectric]
+    
+    xlabel = capacity.index
+    ylabel = "Installed Capacity [GW]"
+    title = 'Comparison of total installed capacity per carrier in 2019'
+    nation = 'IT_capacity'
+    
+    plot_histogram(capacity, n, xlabel, ylabel, title, nation)
+    
+    return capacity
+    
 
     
+def italy_2019_postprocessing(df):
+    # Rename "Solar PV" to "Photovoltaic"
+    df.rename(index={"Solar PV": "Photovoltaic"}, inplace=True)
+    
+    # Create the "Other RES" row by summing Biofuels, Waste, and Geothermal
+    df.loc['Other RES'] = df.loc[['Biofuels', 'Geothermal']].sum(axis=0)
+    
+    # Create the "Thermoelectric" row by summing Coal, Oil, and Natural Gas
+    df.loc['Thermoelectric'] = df.loc[['Coal', 'Oil', 'Natural gas', 'Waste']].sum(axis=0)
+    
+    # Remove the original rows for Biofuels, Waste, Geothermal, Coal, Oil, and Natural Gas
+    df.drop(index=['Biofuels', 'Waste', 'Geothermal', 'Coal', 'Oil', 'Natural gas'], inplace=True)
+    
+    # Reorder the rows according to the specified order
+    df = df.loc[['Photovoltaic', 'Wind', 'Hydro', 'Other RES', 'Thermoelectric']]
+    
+    # Return the modified dataframe
+    return df
 
 def prod_load(prod, load):
     prod = prod.sort_index()
@@ -170,7 +232,18 @@ def compute_expected_emissions_2040(n):
         "target_emissions_2040_tonnes": target_emissions_2040 /1e6
     }
 
+
+def f_emissions_italy(n):
+    generators = n.generators[n.generators.bus.str.startswith("IT")]
+    generators_t = n.generators_t.p.loc[:, n.generators_t.p.columns.str.startswith('IT')]
     
+    emissions = (
+        generators_t.div(generators.efficiency, axis=1)
+        .mul(generators.carrier.map(n.carriers.co2_emissions), axis=1)
+        .sum().sum()
+    ) / 1e6
+    
+    return emissions
 
 def plot_useful_things(n):
     # 1. Trova le linee tra IT e SI
@@ -279,6 +352,11 @@ def plot_SI(n):
     plt.show()
     
     
+
+
+
+    
+    
         
 
 def plot_histogram(df, n, xlabel, ylabel, title, nation):
@@ -334,7 +412,7 @@ def plot_histogram(df, n, xlabel, ylabel, title, nation):
 
 # Main
 if __name__ == "__main__":
-    n = pypsa.Network("C:\\Users\\aless\\Desktop\\PhD_Pisa\\2025_01_03\\pypsa-europe\\validation50nodes\\2019_validation.nc")
+    n = pypsa.Network("C:\\Users\\aless\\Desktop\\PhD_Pisa\\2025_01_03\\network_analysis\\networks\\2019_validation_geothermal.nc")
     
     load = total_load(n)
     
@@ -355,10 +433,16 @@ if __name__ == "__main__":
         total_production[nation] = prod['PyPSA'].sum()
         
     total_production = pd.DataFrame.from_dict(total_production, orient='index', columns=['Production'])
-    total_production.loc['IT'] = prod_italy(n)
+    total_production.loc['IT'], prod_italy_df = prod_italy(n)
+    
+    capacity_italy_df = capacity_installed_italy(n)
     
     prod_load(total_production, load)
     emissions = compute_expected_emissions_2040(n)
+    emissions_italy = f_emissions_italy(n)
+    
+    
+    
     # plot_useful_things(n)
     # plot_import_export_SIAT(n)
     # plot_SI(n)

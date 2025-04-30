@@ -9,6 +9,7 @@ import os
 import sys
 from pathlib import Path
 import numpy as np
+from matplotlib.colors import to_rgba
 
 # Determina il percorso assoluto della directory corrente
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -218,11 +219,16 @@ class PyPSANetworkAnalyzer:
                 )
         
         # Personalizzazione del grafico
-        ax.set_title("Increase in Size of Generators")
-        ax.set_xlabel("Carrier")
-        ax.set_ylabel("Size (MW)")
+        ax.set_ylabel("Size (MW)", fontsize = 14, fontweight = "bold")
+        ax.set_title("Increase in Size of Generators", fontsize=16, fontweight='bold')
+
+
+        # Assegna le etichette formattate all'asse X
+        x = np.arange(len(p_nom_opt.index))
+        ax.set_xticks(x)
+        ax.set_xticklabels(p_nom_opt.index, rotation=30, ha="right", fontsize=10, fontstyle='italic', color='#2F4F4F')  # Rotazione a 30°
+        
         ax.set_yscale("log")  # Imposta scala logaritmica per l'asse y
-        ax.tick_params(axis='x', rotation=45)  # Ruota le etichette dell'asse x
         plt.tight_layout()
         
         if self.config.get('INCREASE_IN_SIZE_GENERATORS', 'save'):
@@ -254,6 +260,8 @@ class PyPSANetworkAnalyzer:
         dispatch = dispatch.drop(["Offshore Wind (AC)", "Offshore Wind (DC)", "Offshore Wind (Floating)", 'geothermal', 'ror', 'solar-hsat'], errors='ignore')
         dispatch.loc["Offwind"] = offwind_sum
         
+        dispatch = dispatch / 1e3 # TWh
+        
         # colors = [colors.get(carrier, '#333333') for carrier in dispatch.index]
         
         # Extract the color for each carrier from the network.carriers dataframe
@@ -281,12 +289,18 @@ class PyPSANetworkAnalyzer:
                     ha='center', va='bottom', fontsize=7, color='black'  # Allineamento e stile
                 )
         
-        # Personalizzazione del grafico
-        ax.set_title("Supply for generators")
-        ax.set_xlabel("Carrier")
-        ax.set_ylabel("Size (MW)")
+        # Personalizzazione del graficoù
+        ax.set_ylabel("Energy (TWh)", fontsize = 14, fontweight = "bold")
+        ax.set_title("Total energy dispatch by carrier", fontsize=16, fontweight='bold')
+
+
+        # Assegna le etichette formattate all'asse X
+        x = np.arange(len(dispatch.index))
+        ax.set_xticks(x)
+        ax.set_xticklabels(dispatch.index, rotation=30, ha="right", fontsize=10, fontstyle='italic', color='#2F4F4F')  # Rotazione a 30°
+        
+        
         ax.set_yscale("log")  # Imposta scala logaritmica per l'asse y
-        ax.tick_params(axis='x', rotation=90)  # Ruota le etichette dell'asse x
         plt.tight_layout()
         
         if self.config.get('DISPATCH_BY_CARRIER', 'save_histogram_year'):
@@ -294,100 +308,75 @@ class PyPSANetworkAnalyzer:
             
         
     
-    
+
     def plot_generators_size(self):
-        
-        line_technologies = ['AC', 'DC']
-        
         if self.config.get('NETWORK', 'nation_only_analysis'):
             nation = self.config.get('NETWORK', 'nation')
             generators = self.network.generators[self.network.generators.index.str.startswith(nation)]
             storage_units = self.network.storage_units[self.network.storage_units.index.str.startswith(nation)]
             stores = self.network.stores[self.network.stores.index.str.startswith(nation)] if not self.network.stores.empty else self.network.stores
-            links = self.network.links[self.network.links.index.str.startswith(nation)]
-            lines = self.network.lines[self.network.lines.bus0.str.startswith(nation) | self.network.lines.bus1.str.startswith('IT')]
-            
+    
+            # Build optimal capacity Series
             optimal_capacity = pd.concat([
                 generators.groupby('carrier').sum().p_nom_opt,
                 storage_units.groupby('carrier').sum().p_nom_opt,
                 stores.groupby('carrier').sum().e_nom_opt,
-                links.groupby('carrier').sum().p_nom_opt,
-                lines.groupby('carrier').sum().s_nom_opt
             ])
-            
-            installed_capacity = pd.concat([
-                generators.groupby('carrier').sum().p_nom,
-                storage_units.groupby('carrier').sum().p_nom,
-                stores.groupby('carrier').sum().e_nom,
-                links.groupby('carrier').sum().p_nom,
-                lines.groupby('carrier').sum().s_nom
-            ])
-            
-            optimal_capacity.index = [self.network.carriers.loc[index]['nice_name'] for index in optimal_capacity.index]
-            installed_capacity.index = [self.network.carriers.loc[index]['nice_name'] for index in installed_capacity.index]
         else:
             statistics = self.statistics.loc[self.statistics.index != ('Load', '-')].droplevel(0)
-        
-            # Sposta "AC" e "DC" alla fine
-            main_statistics = statistics.loc[~statistics.index.isin(line_technologies)]
-            line_statistics = statistics.loc[statistics.index.isin(line_technologies)] /1e3
-            statistics = pd.concat([main_statistics, line_statistics])  # Ricombina, con AC/DC alla fine
-            
             optimal_capacity = statistics['Optimal Capacity']
-            installed_capacity = statistics['Installed Capacity']
     
-        # Creazione della figura
+        # Group offwind
+        offwind_keys = ['offwind-ac', 'offwind-dc', 'offwind-float']
+        offwind_sum = optimal_capacity.get(offwind_keys, pd.Series()).sum()
+        if offwind_sum > 0:
+            optimal_capacity.loc['offwind'] = offwind_sum
+        optimal_capacity = optimal_capacity.drop(offwind_keys, errors='ignore')
+    
+        # Group hydro components
+        hydro_keys = ['ror', 'PHS', 'hydro']
+        hydro_sum = optimal_capacity.get(hydro_keys, pd.Series()).sum()
+        if hydro_sum > 0:
+            optimal_capacity.loc['Hydro'] = hydro_sum
+        optimal_capacity = optimal_capacity.drop(hydro_keys, errors='ignore')
+    
+        # Drop battery charger/discharger
+        optimal_capacity = optimal_capacity.drop(['battery charger', 'battery discharger'], errors='ignore')
+    
+        # Filter by minimum capacity
+        optimal_capacity = optimal_capacity[optimal_capacity >= 1]  # ≥ 1 MW
+    
         technologies = optimal_capacity.index.tolist()
-        x = np.arange(len(technologies))  # Posizioni sull'asse x
-        width = 0.35  # Larghezza delle barre
+        x = np.arange(len(technologies))
+        width = 0.6
     
-        fig, ax1 = plt.subplots(figsize=(14, 8))
+        # Color mapping
+        base_colors = self.colors.copy()
+        base_colors.loc['offwind'] = base_colors.get('offwind-ac', '#333333')
+        base_colors.loc['Hydro'] = base_colors.get('hydro', '#0072B2')
+        color_list = [base_colors.get(tech, '#333333') for tech in technologies]
     
-        # Istogramma per le tecnologie principali
-        bars1 = ax1.bar(x - width/2, optimal_capacity, width, label='Optimal Capacity', color='skyblue')
-        bars2 = ax1.bar(x + width/2, installed_capacity, width, label='Installed Capacity', color='salmon')
+        # Plotting
+        fig, ax = plt.subplots(figsize=(14, 8))
+        bars = ax.bar(x, optimal_capacity, width, label='Optimal Capacity', color=color_list)
     
-        # Aggiunta dei valori sopra le barre solo per Optimal Capacity
-        for (i,bar) in enumerate(bars1):
+        for i, bar in enumerate(bars):
             height = bar.get_height()
-            if height > 0 and i<len(bars1)-2:  # Mostra solo se il valore è maggiore di zero
-                ax1.text(bar.get_x() + bar.get_width() / 2, height + max(optimal_capacity) * 0.01,
-                         f'{height:.2e}', ha='center', va='bottom', fontsize=5)
+            if height > 0:
+                ax.text(bar.get_x() + bar.get_width() / 2, height + max(optimal_capacity) * 0.01,
+                        f'{height:.2e}', ha='center', va='bottom', fontsize=9)
     
-        # Scala secondaria per le tecnologie AC e DC
-        ax2 = ax1.twinx()  # Secondo asse y condiviso
-        line_indices = [i for i, tech in enumerate(technologies) if tech in line_technologies]
+        ax.set_title('Optimal Capacity per Technology', fontsize=16, fontweight='bold')
+        ax.set_xlabel('Technologies', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Capacity [kW]', fontsize=12, fontweight='bold')
+        ax.set_xticks(x)
+        ax.set_xticklabels(technologies, rotation=45, ha='right', fontsize=10)
+        ax.legend()
     
-        # Aggiunta delle barre per AC e DC nell'asse secondario
-        bars_ac_dc = []
-        for idx in line_indices:
-            bar = ax2.bar(x[idx] - width / 2, optimal_capacity.iloc[idx], width, color='lightgreen',
-                          label='Optimal Capacity (AC/DC) [GW]' if not bars_ac_dc else "")
-            for barr in bar:
-                height = barr.get_height()
-                if height > 0:  # Mostra solo se il valore è maggiore di zero
-                    ax2.text(barr.get_x() + barr.get_width() / 2, height ,
-                             f'{height:.2e}', ha='center', va='bottom', fontsize=5)
-            bars_ac_dc.append(bar)
-    
-        # Configurazione del primo asse
-        ax1.set_title('Confronto delle tecnologie con scala separata per AC/DC', fontsize=16)
-        ax1.set_xlabel('Tecnologie', fontsize=12)
-        ax1.set_ylabel('Capacità (tecnologie principali)', fontsize=12)
-        ax1.set_xticks(x)
-        ax1.set_xticklabels(technologies, rotation=45, ha='right', fontsize=10)
-        ax1.legend(loc='upper left')
-    
-        # Configurazione del secondo asse
-        ax2.set_ylabel('Capacità (AC/DC)', fontsize=12)
-    
-        # Layout compatto
         plt.tight_layout()
     
-        # Salvataggio dell'immagine
         if self.config.get('SIZE_GENERATORS', 'save'):
             plt.savefig(f"{self.output_folder}/size_generators.png", format='png', dpi=300, bbox_inches='tight')
-
 
 
     def plot_dispatchbycarrier_year(self, dispatch_by_carrier):
@@ -547,32 +536,62 @@ class PyPSANetworkAnalyzer:
         
         self.plot_nom_opt(s, p_nom_opt, colors, title, output)
         
-    def plot_network_p_nom_opt_stor(self):
-        """Plot the network layout, based on the optimal size of the generators (s)"""
         
-        # 1. Concatenare p_nom_opt da generators, storage_units e stores
+    def plot_network_p_nom_opt_stor(self):
+        """Plot network layout showing storage capacities grouped by location."""
+    
+        # Combine all storages into a single dataframe
         all_pnoms = pd.concat([
             self.network.storage_units.assign(component='storage_unit')[['bus', 'carrier', 'p_nom_opt']],
             self.network.stores.assign(component='store')[['bus', 'carrier', 'e_nom_opt']].rename(columns={'e_nom_opt': 'p_nom_opt'})
         ])
-        
-        # 2. Calcolare le dimensioni dei bus (gruppati per bus e carrier)
-        s = all_pnoms.groupby(['bus', 'carrier'])['p_nom_opt'].sum()
-        
-        # 3. Somma totale per ogni carrier (per la legenda)
+    
+        # Map secondary buses (battery/H2) to their parent bus (e.g., 'AT0 0 battery' → 'AT0 0')
+        def get_main_bus(bus):
+            if bus.endswith(" battery") or bus.endswith(" H2"):
+                return " ".join(bus.split(" ")[:-1])
+            return bus
+    
+        all_pnoms['main_bus'] = all_pnoms['bus'].apply(get_main_bus)
+    
+        # Re-aggregate by main_bus and carrier
+        s = all_pnoms.groupby(['main_bus', 'carrier'])['p_nom_opt'].sum()
+    
+        # Total capacity per carrier (used for legend)
         p_nom_opt = all_pnoms.groupby('carrier')['p_nom_opt'].sum()
-        
-        # 4. Colori da dizionario self.colors
+    
+        # Assign colors
         colors = [self.colors.get(carrier, '#333333') for carrier in p_nom_opt.index]
-        
-        title = "Network Layout per storages optimal capacity"
+    
+        # Call general plotting function
+        title = "Network Layout per storage units optimal capacity"
         output = 'stores'
-
-        
+    
         self.plot_nom_opt(s, p_nom_opt, colors, title, output)
+
         
         
     def plot_nom_opt(self, s, p_nom_opt, colors, title, output):
+        
+        legend_map = {
+            'CCGT': 'Combined-cycle gas',
+            'biomass': 'Biomass',
+            'geothermal': 'Geothermal',
+            'nuclear': 'Nuclear',
+            'offwind-ac': 'Offwind',
+            'offwind-dc': 'Offwind',
+            'offwind-float': 'Offwind',
+            'oil': 'Oil',
+            'onwind': 'Wind onshore',
+            'ror': 'Run of river',
+            'solar': 'Photovoltaic',
+            'solar-hsat': 'solar hsat',
+            'H2': 'Hydrogen',
+            'PHS': 'Pumped-hydro storage',
+            'battery': 'Battery storage',
+            'hydro': 'Hydro storage'
+            }
+            
         
         fig = plt.figure()
         ax = plt.axes(projection=ccrs.PlateCarree())
@@ -590,16 +609,28 @@ class PyPSANetworkAnalyzer:
                           line_cmap = plt.cm.viridis, 
                           )
         
+        # Plot only bus names that do NOT end with 'battery' or 'H2'
+        if self.config.get('NETWORK_PLOT', 'show_bus_labels'):
+            for bus_name, row in self.network.buses.iterrows():
+                if not (bus_name.lower().endswith('battery') or bus_name.lower().endswith('h2')):
+                    ax.text(row['x'], row['y'], bus_name, fontsize=4, ha='center', va='center',
+                            transform=ccrs.PlateCarree(), zorder=5)
+
 
         
-        # Add legend based on carriers
+        # Filter out entries with capacity <= 1
+        legend_mask = p_nom_opt > 1
+        filtered_labels = p_nom_opt[legend_mask].index
+        filtered_colors = [colors[i] for i, label in enumerate(p_nom_opt.index) if label in filtered_labels]
+        display_labels = [legend_map.get(label, label) for label in filtered_labels]  # Fallback to original if not mapped
+                
         add_legend_patches(
             ax=ax,
-            colors=colors,
-            labels=p_nom_opt.index,
+            colors=filtered_colors,
+            labels=display_labels,
             legend_kw=dict(frameon=True,
                            loc='upper right', fontsize=6,
-                           title='Carriers', title_fontsize=6)
+                           title='Carriers', title_fontsize=6, framealpha=0.8)
         )
         
         # Parametri per la legenda delle linee
@@ -619,7 +650,7 @@ class PyPSANetworkAnalyzer:
         line_legend = ax.legend(
             handles, labels, title="Line loading",
             loc="lower left", frameon=True, fontsize=6,
-            title_fontsize=6
+            title_fontsize=6, framealpha=0.8
         )
         
         # Aggiungi la seconda legenda al grafico
@@ -677,6 +708,8 @@ class PyPSANetworkAnalyzer:
         
         vnorm = self.config.get('NETWORK_PLOT', 'range_normalization')
         norm = plt.Normalize(vmin=vnorm[0], vmax=vnorm[1])  # €/MWh
+
+
         
         self.network.plot(
             ax=ax,
@@ -684,7 +717,7 @@ class PyPSANetworkAnalyzer:
             bus_cmap="plasma",
             bus_norm=norm,
             bus_alpha=1,
-            bus_sizes=0.1
+            bus_sizes=0.1,
         )
         
         plt.colorbar(
@@ -702,7 +735,7 @@ class PyPSANetworkAnalyzer:
 # Usage example
 if __name__ == "__main__":
     config = Config()
-    network_name = '2040_deit.nc'
+    network_name = '2040_deit_def.nc'
     network_analyzer =  PyPSANetworkAnalyzer(network_name, config)
 
 

@@ -112,8 +112,8 @@ class SlidersGeneration():
             xaxis=dict(visible=False),  # Nasconde asse X
             yaxis=dict(visible=False),  # Nasconde asse Y
             margin=dict(t=50, b=50, l=50, r=50),
-            width=800,
-            height=600,
+            width=1200,
+            height=850,
             updatemenus=[
                 dict(
                     type="buttons",
