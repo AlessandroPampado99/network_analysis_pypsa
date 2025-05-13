@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 import numpy as np
 from matplotlib.colors import to_rgba
+import matplotlib.patches as mpatches
 
 # Determina il percorso assoluto della directory corrente
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -124,6 +125,7 @@ class PyPSANetworkAnalyzer:
         if self.config.get('NETWORK_PLOT', 'plot_network_pnomopt'):
             self.plot_network_p_nom_opt_gen()
             self.plot_network_p_nom_opt_stor()
+            self.plot_network_p_nom_opt_all()
         if self.config.get('NETWORK_PLOT', 'plot_network_marginalcost'):
             self.plot_network_marginal_cost()
         if self.config.get('NETWORK_PLOT', 'plot_network_totalload'):
@@ -568,10 +570,51 @@ class PyPSANetworkAnalyzer:
         output = 'stores'
     
         self.plot_nom_opt(s, p_nom_opt, colors, title, output)
+        
+    
+    def plot_network_p_nom_opt_all(self):
+        """Plot network layout combining generators, storage units, and stores."""
+    
+        # Combine all components into one DataFrame
+        gen_df = self.network.generators[['bus', 'carrier', 'p_nom_opt']].copy()
+        su_df = self.network.storage_units[['bus', 'carrier', 'p_nom_opt']].copy()
+        sto_df = self.network.stores[['bus', 'carrier', 'e_nom_opt']].rename(columns={'e_nom_opt': 'p_nom_opt'}).copy()
+    
+        # Identify the component type (optional, could be useful later)
+        gen_df['component'] = 'generator'
+        su_df['component'] = 'storage_unit'
+        sto_df['component'] = 'store'
+    
+        # Concatenate all components
+        all_pnoms = pd.concat([gen_df, su_df, sto_df], ignore_index=True)
+    
+        # Normalize bus names for H2 and battery suffixes
+        def get_main_bus(bus):
+            if bus.endswith(" battery") or bus.endswith(" H2"):
+                return " ".join(bus.split(" ")[:-1])
+            return bus
+    
+        all_pnoms['main_bus'] = all_pnoms['bus'].apply(get_main_bus)
+    
+        # Group by bus and carrier to get sizes
+        s = all_pnoms.groupby(['main_bus', 'carrier'])['p_nom_opt'].sum()
+    
+        # Total capacity per carrier for the legend
+        p_nom_opt = all_pnoms.groupby('carrier')['p_nom_opt'].sum()
+    
+        # Assign colors
+        colors = [self.colors.get(carrier, '#333333') for carrier in p_nom_opt.index]
+    
+        # Call the generic plotting function
+        title = "Network Layout per total optimal capacity"
+        output = 'all_components'
+    
+        self.plot_nom_opt(s, p_nom_opt, colors, title, output)
 
         
         
     def plot_nom_opt(self, s, p_nom_opt, colors, title, output):
+        
         
         legend_map = {
             'CCGT': 'Combined-cycle gas',
@@ -629,7 +672,7 @@ class PyPSANetworkAnalyzer:
             colors=filtered_colors,
             labels=display_labels,
             legend_kw=dict(frameon=True,
-                           loc='upper right', fontsize=6,
+                           loc='upper right', fontsize=5,
                            title='Carriers', title_fontsize=6, framealpha=0.8)
         )
         
@@ -650,11 +693,40 @@ class PyPSANetworkAnalyzer:
         line_legend = ax.legend(
             handles, labels, title="Line loading",
             loc="lower left", frameon=True, fontsize=6,
-            title_fontsize=6, framealpha=0.8
+            title_fontsize=6, framealpha=0.5
         )
         
         # Aggiungi la seconda legenda al grafico
         ax.add_artist(line_legend)
+        
+        bus_scale = self.config.get('NETWORK_PLOT', 'bus_scaling_factor')
+        ref_values = [3e6, 1e7]  # in kW ad esempio (1 GW, 5 GW)
+        ref_sizes = [v / bus_scale for v in ref_values]  # come nel plot
+
+        ref_colors = ['#1f77b4', '#1f77b4']
+        
+        size_handles = [
+            plt.scatter([], [], s=size,
+                        facecolors=color, alpha=0.6)
+            for size, color in zip(ref_sizes, ref_colors)
+        ]
+        size_labels = [f"{v / 1e6:.1f} GW" for v in ref_values]
+
+        
+        size_legend = ax.legend(
+            size_handles, size_labels,
+            loc='upper left',
+            frameon=True,
+            fontsize=6,
+            title_fontsize=6,
+            framealpha=0.3,
+            handletextpad=2,
+            labelspacing=1.2,
+            borderaxespad=0
+            ,
+            borderpad = 1.2
+        )
+        ax.add_artist(size_legend)
         
         # Add title
         plt.title(title, fontweight='bold')
@@ -735,7 +807,7 @@ class PyPSANetworkAnalyzer:
 # Usage example
 if __name__ == "__main__":
     config = Config()
-    network_name = '2040_deit_def.nc'
+    network_name = '2040_deit_geothermal.nc'
     network_analyzer =  PyPSANetworkAnalyzer(network_name, config)
 
 

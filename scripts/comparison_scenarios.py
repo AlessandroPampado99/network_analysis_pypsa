@@ -14,15 +14,17 @@ class ScenarioComparison:
         # Dictionary for scenario conversion
         self.conversion_scenario = {
             "2040_deit_def": "DE-IT",
-            "2040_deit_biomass_limit": "DE-IT",
+            "2040_deit_geothermal": "DE-IT",
             "commodity_nze": "WEO",
             "low_electrical_demand": "LED",
             "nuclear_base": "NCL",
             "no_co2_emissions": "NOCO2",
-            'nuclear_no_emissions': "NCLCO2",
-            'no_biomass_limit': 'BIO',
+            'nuclear_noco2': "NCLCO2",
+            'bio_exp_noco2': "BIOCO2",
+            'bio_expansion': 'BIO',
             'prova_nuclear_installazione': "PROVA"
         }
+
         
         # Dictionary to map technology short names to full descriptions
         self.legend_map = {
@@ -238,7 +240,7 @@ class ScenarioComparison:
         # Combine offshore wind into 'offwind'
         offwind_keys = ['offwind-ac', 'offwind-dc', 'offwind-float']
         offwind_sum = series.get(offwind_keys, pd.Series()).sum()
-        if offwind_sum > 0:
+        if offwind_sum > 0.5:
             series.loc['offwind'] = offwind_sum
         series = series.drop(offwind_keys, errors='ignore')
     
@@ -321,15 +323,13 @@ class ScenarioComparison:
         
         # Filter buses in Italy
         buses_in_italy = n.buses[n.buses.index.str.startswith(nation)].index
+        filtered_buses = buses_in_italy[~buses_in_italy.str.contains("h2|battery", case=False)]
         
         # Extract the marginal prices for the buses in Italy (only those buses)
-        marginal_prices = n.buses_t.marginal_price[buses_in_italy]
+        marginal_prices = n.buses_t.marginal_price[filtered_buses]
+        p_set = n.loads_t.p_set[filtered_buses]
         
-        # Filter out buses that contain 'h2' or 'battery'
-        filtered_marginal_prices = marginal_prices.loc[:, ~marginal_prices.columns.str.contains('h2|battery', case=False, na=False)]
-        
-        # Calculate the average marginal price for the filtered buses
-        average_marginal_price = filtered_marginal_prices.mean().mean()  # Mean across both rows and columns
+        average_marginal_price = ((marginal_prices * p_set).sum() / p_set.sum().sum()).sum()
         
         # Add the average marginal price to the objective_data dictionary
         objective_data = [objective_data, average_marginal_price]
@@ -344,7 +344,7 @@ class ScenarioComparison:
         for nation in ['IT', 'FR', 'CH', 'AT', 'SI', 'GR', 'ME']:
             total += self.objective_evaluation(n, nation, verbose=True)
         
-        expected = n.objective + n.objective_constant
+        expected = (n.objective + n.objective_constant) / 1e9
         diff = total - expected
         print(f"\n=== Summary ===")
         print(f"Computed: {total:,.2f}")
@@ -369,31 +369,49 @@ class ScenarioComparison:
         - ylabel_avg_price (str): The label for the average price y-axis.
         """
         fig, ax1 = plt.subplots(figsize=(12, 6))
-    
+        
         # Plot the histogram for the objective
-        ax1.bar(df.columns, df.loc['objective'], color='skyblue', label='Objective', width=0.6, edgecolor='black')
+        bars = ax1.bar(df.columns, df.loc['objective'], color='skyblue', label='Objective', width=0.6, edgecolor='black')
         ax1.set_ylabel(ylabel_objective, fontsize=12, fontweight='bold')
+        
+        # Add the value labels for objective
+        for bar in bars:
+            height = bar.get_height()
+            ax1.annotate(f'{height:.2f}',  # Display the value with two decimals
+                         xy=(bar.get_x() + bar.get_width() / 2, height),  # Position of the label
+                         xytext=(0, 5),  # Offset label position
+                         textcoords="offset points",
+                         ha='center', va='bottom', fontsize=10, color='black')
         
         # Create the second y-axis for the average price
         ax2 = ax1.twinx()
         ax2.scatter(df.columns, df.loc['average_price'], color='orange', marker='*', s=300, label='Average Price')
         ax2.set_ylabel(ylabel_avg_price, fontsize=12, fontweight='bold')
-    
+        
+        # Add the value labels for average price
+        for i, avg_price in enumerate(df.loc['average_price']):
+            ax2.annotate(f'{avg_price:.2f}',  # Display the value with two decimals
+                         xy=(df.columns[i], avg_price),  # Position of the label
+                         xytext=(0, 5),  # Offset label position
+                         textcoords="offset points",
+                         ha='center', va='bottom', fontsize=10, color='black')
+        
         # Add title and customize the x-ticks
         ax1.set_title(title, fontsize=14, fontweight='bold')
         ax1.set_xticklabels([self.conversion_scenario.get(col, col) for col in df.columns], rotation=45, ha='right', fontsize=10)
         
         # Add legends
         ax1.legend(loc='upper left', title='Objective', fontsize=10)
-        ax2.legend(loc='upper right', title='Average Price', fontsize=10)
-    
+        ax2.legend(loc='lower right', title='Average Price', fontsize=10)
+        
         # Add gridlines
         ax1.grid(True, linestyle='--', alpha=0.7)
-    
+        
         # Adjust the layout and show the plot
         plt.tight_layout()
         plt.savefig(f"{self.output_folder}/{output_name}.png", format='png', dpi=300, bbox_inches='tight')
         plt.show()
+
 
     def plot_bar_chart(self, df, title, xlabel, ylabel, output_name):
         """
@@ -415,7 +433,8 @@ class ScenarioComparison:
             '#00FF00',  # Green
             '#0000FF',  # Blue
             '#4B0082',  # Indigo
-            '#8B00FF'   # Violet
+            '#8B00FF',  # Violet
+            '#ff00e1'   # Magenta
         ]
         
         # Create the bar chart with vibrant rainbow colors for the scenarios
@@ -477,7 +496,7 @@ class ScenarioComparison:
         # Plot p_nom_opt data (size of hydrogen installations) on the first axis
         ax1.bar(p_nom_opt_data.columns, p_nom_opt_data.loc['H2'], color='skyblue', label='Hydrogen Size', width=0.4, edgecolor='black', align='center')
         ax1.set_xlabel('Scenarios', fontsize=12)
-        ax1.set_ylabel('Hydrogen Size (GW)', fontsize=12, color='black', fontweight='bold')
+        ax1.set_ylabel('Hydrogen Size (GWh)', fontsize=12, color='black', fontweight='bold')
         ax1.set_yscale('log')  # Log scale for size (p_nom_opt)
         ax1.tick_params(axis='y', labelcolor='black')
         
@@ -513,9 +532,9 @@ class ScenarioComparison:
         return p_nom_opt_data_cleaned, p_dispatch_data_cleaned
 
 if __name__ == "__main__":
-    name_list = ['2040_deit_biomass_limit', 'commodity_nze',
-                 'low_electrical_demand', 'no_co2_emissions',
-                 'nuclear_base', 'nuclear_no_emissions',
-                 'no_biomass_limit']
+    name_list = ['2040_deit_geothermal', 'low_electrical_demand',
+                 'commodity_nze', 'nuclear_base',
+                 'bio_expansion', 'no_co2_emissions',
+                 'nuclear_noco2', 'bio_exp_noco2']
     # name_list = ['nuclear_no_emissions']
     scenario_comparison = ScenarioComparison(name_list)

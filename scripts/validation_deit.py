@@ -276,7 +276,7 @@ def plot_histogram(df, n, xlabel, ylabel, title, output_folder):
 
 # Main
 if __name__ == "__main__":
-    name = "2040_deit_geothermal"
+    name = "no_co2_emissions"
     n = pypsa.Network(f"../networks/{name}.nc")
     
     output_folder = f"../results/{name}"
