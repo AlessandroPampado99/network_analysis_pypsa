@@ -1,47 +1,48 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Jan 15 09:11:47 2025
-
-@author: aless
-"""
-
+# config/config.py
 import logging
 from configparser import ConfigParser
+from pathlib import Path
+import ast
 
-# Class for the initial configuration of the project
-class Config():
-    def __init__(self):
+class Config:
+    def __init__(self, filename: str = "application.ini"):
+        self.log = logging.getLogger(__name__)
+        if not self.log.handlers:
+            logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
+
         self.parser = ConfigParser()
-        self.parser.read("C:\\Users\\aless\\Desktop\\PhD_Pisa\\2025_01_03\\network_analysis\\config\\application.ini")
-        
-        self.config = {}  # Dizionario che conterrà la configurazione
+        self.config = {}
+
+        # Read INI relative to this file, not to cwd
+        self.config_path = Path(__file__).resolve().with_name(filename)
+        loaded = self.parser.read(self.config_path, encoding="utf-8")
+        if loaded:
+            self.log.info("Loaded config: %s", loaded[0])
+        else:
+            self.log.error("Config file NOT found at: %s", self.config_path)
+
         self.init()
-        
-#%% Section for the workflow of the system
+
+    # --- keep your logic, just safer parse_value ---
     def init(self):
         self.set_attributes()
 
-#%% Method to dinamically read the parameters in the config file
     def set_attributes(self):
         for section in self.parser.sections():
-            self.config[section] = {}  # Crea un dizionario per ogni sezione
+            self.config[section] = {}
             for key in self.parser[section]:
                 value = self.parse_value(self.parser[section][key])
-                self.config[section][key] = value  # Aggiunge chiave e valore alla sezione
+                self.config[section][key] = value
 
-#%% Method to understand the type of the parsed value
     def parse_value(self, value):
+        # Safer than eval
         try:
-            # Try to evaluate the value
-            evaluated_value = eval(value)
-            # If the evaluated value is not a string, return it
+            evaluated_value = ast.literal_eval(value)
             if not isinstance(evaluated_value, str):
                 return evaluated_value
-        except:
-            # If evaluation fails, return the original string
+        except Exception:
             pass
         return value
 
-#%% Method to retrieve a value from the config dictionary
     def get(self, section, key, default=None):
         return self.config.get(section, {}).get(key, default)

@@ -31,7 +31,7 @@ class Flowchart():
         if isinstance(self.network_name, str):
             if self.network_name == 'everything':
                 network_names = list()
-                for file in os.listdir("../networks"):
+                for file in os.listdir("networks"):
                     # Controlla se il file ha estensione .nc
                     if file.endswith(".nc"):
                         network_names.append(file)  # Salva il percorso completo
@@ -63,7 +63,7 @@ class Flowchart():
         if networks_to_animate != str():
             graphs_list = config.get('ANIMATION', 'graphs_to_animate')
             for graph in graphs_list:
-                image_paths = [f"../results/{network}/{graph}.png" for network in networks_to_animate]
+                image_paths = [f"results/{network}/{graph}.png" for network in networks_to_animate]
                 sliders_generation = SlidersGeneration(image_paths, networks_to_animate, graph, output_writer.output_folder)
                 
                     

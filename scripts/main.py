@@ -1,31 +1,22 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Jan 15 09:12:35 2025
+# scripts/main.py
+from .paths import ROOT, project_path
+from config import Config            # thanks to config/__init__.py
+from .flowchart import Flowchart
 
-@author: aless
-"""
+def main():
+    # Small verbosity
+    print("Project root:", ROOT)
 
-import os
-import sys
+    # Load config (reads config/application.ini)
+    cfg = Config()
 
-# Determina il percorso assoluto della directory corrente
-current_dir = os.path.dirname(os.path.abspath(__file__))
+    # Example: build a robust path to the network file
+    nc_path = project_path("networks", "Italy2019_uc_davide.nc")
+    print("Using network file:", nc_path)
 
-# Aggiungi il percorso relativo alla directory `../config`
-config_path = os.path.abspath(os.path.join(current_dir, "../config"))
+    # Do your work
+    fc = Flowchart(cfg)
+    # fc.run(nc_path)  # or whatever your API is
 
-# Aggiungi il percorso a sys.path
-sys.path.append(config_path)
-
-
-from config import Config
-from flowchart import Flowchart
-
-config = Config()
-
-flowchart = Flowchart(config)
-
-
-
-
-    
+if __name__ == "__main__":
+    main()

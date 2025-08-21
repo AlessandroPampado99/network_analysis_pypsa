@@ -258,9 +258,19 @@ class PyPSANetworkAnalyzer:
             statistics = self.statistics.loc[~self.statistics.index.isin([('Load', '-'), ('Line', 'AC'), ('Link', 'DC')])].droplevel(0)
             dispatch = statistics['Supply'].T
             
-        offwind_sum = dispatch.loc[["Offshore Wind (AC)", "Offshore Wind (DC)", "Offshore Wind (Floating)"]].sum()
-        dispatch = dispatch.drop(["Offshore Wind (AC)", "Offshore Wind (DC)", "Offshore Wind (Floating)", 'geothermal', 'ror', 'solar-hsat'], errors='ignore')
-        dispatch.loc["Offwind"] = offwind_sum
+       # Merge Offshore Wind variants safely (skip missing, default to zeros)
+        offwind_sources = ["Offshore Wind (AC)", "Offshore Wind (DC)", "Offshore Wind (Floating)"]
+
+        # Treat missing rows as zeros and sum
+        subset = dispatch.reindex(offwind_sources)              # adds missing rows (all-NaN) without error
+        offwind_sum = subset.fillna(0).sum()                    # Series (if DataFrame -> per-column sum; if Series -> scalar)
+
+        # Drop original rows (and a few others) if present
+        dispatch = dispatch.drop(offwind_sources, errors='ignore')
+
+        # Create/overwrite the aggregated row
+        dispatch.loc["Offwind"] = offwind_sum                   # broadcasts correctly (zeros if none existed)
+
         
         dispatch = dispatch / 1e3 # TWh
         
